@@ -11,6 +11,8 @@
 //   - SetAllowedExtensions(".pdf;.xlsx;.csv"): Filter setzen
 //   - Outlook Emails: Emails koennen direkt aus Outlook gezogen werden
 //     und werden als .msg Dateien im Temp-Verzeichnis gespeichert
+//   - Outlook Anhaenge: Anhaenge koennen direkt aus Outlook gezogen werden
+//     und behalten ihre originale Dateiendung
 // ============================================================
 
 using System;
@@ -65,21 +67,6 @@ namespace DragDropAddIn
         private string _allowedExtensions = "";
         private string _droppedFilePaths = "";
         private bool _isDragOver = false;
-
-        // Log-Datei fuer Diagnostik
-        private static readonly string _logFile = Path.Combine(
-            Path.GetTempPath(), "DragDropBox_Debug.log");
-
-        private static void LogDebug(string message)
-        {
-            try
-            {
-                string line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")
-                    + " | " + message + Environment.NewLine;
-                File.AppendAllText(_logFile, line);
-            }
-            catch { }
-        }
 
         // Farben
         private readonly Color _normalBackColor = Color.FromArgb(240, 245, 250);
@@ -137,14 +124,6 @@ namespace DragDropAddIn
         // -------------------------------------------------------
         private void OnDragEnter(object sender, DragEventArgs e)
         {
-            LogDebug("=== OnDragEnter ===");
-            string[] formats = e.Data.GetFormats();
-            for (int i = 0; i < formats.Length; i++)
-                LogDebug("  Format[" + i + "]: " + formats[i]);
-            LogDebug("  FileDrop: " + e.Data.GetDataPresent(DataFormats.FileDrop));
-            LogDebug("  FileGroupDescriptorW: " + e.Data.GetDataPresent("FileGroupDescriptorW"));
-            LogDebug("  FileGroupDescriptor: " + e.Data.GetDataPresent("FileGroupDescriptor"));
-
             if (e.Data.GetDataPresent(DataFormats.FileDrop)
                 || e.Data.GetDataPresent("FileGroupDescriptorW")
                 || e.Data.GetDataPresent("FileGroupDescriptor"))
@@ -180,37 +159,29 @@ namespace DragDropAddIn
         private void OnDragDrop(object sender, DragEventArgs e)
         {
             _isDragOver = false;
-            LogDebug("=== OnDragDrop ===");
 
             // Fall 1: Normale Dateien (FileDrop)
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
             {
-                LogDebug("  Fall 1: FileDrop");
                 string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
                 if (files != null && files.Length > 0)
                 {
-                    for (int i = 0; i < files.Length; i++)
-                        LogDebug("    Datei[" + i + "]: " + files[i]);
                     ProcessFiles(files);
                 }
                 return;
             }
 
-            // Fall 2: Outlook-Emails (FileGroupDescriptorW + FileContents)
+            // Fall 2: Outlook-Emails/Anhaenge (FileGroupDescriptorW + FileContents)
             if (e.Data.GetDataPresent("FileGroupDescriptorW")
                 || e.Data.GetDataPresent("FileGroupDescriptor"))
             {
-                LogDebug("  Fall 2: Outlook-Email");
                 string[] files = ExtractOutlookFiles(e.Data);
                 if (files != null && files.Length > 0)
                 {
-                    for (int i = 0; i < files.Length; i++)
-                        LogDebug("    Gespeichert[" + i + "]: " + files[i]);
                     ProcessFiles(files);
                 }
                 else
                 {
-                    LogDebug("  FEHLER: ExtractOutlookFiles gab null/leer zurueck!");
                     _dropPanel.BackColor = _errorBackColor;
                     _dropLabel.Text = "Fehler beim Verarbeiten der Outlook-Email!";
                     _dropLabel.ForeColor = Color.Red;
@@ -221,33 +192,26 @@ namespace DragDropAddIn
         }
 
         // -------------------------------------------------------
-        // Outlook-Emails extrahieren (OLE FileGroupDescriptorW)
+        // Outlook-Emails/Anhaenge extrahieren (OLE FileGroupDescriptorW)
         // -------------------------------------------------------
         private string[] ExtractOutlookFiles(System.Windows.Forms.IDataObject data)
         {
             try
             {
-                LogDebug("--- ExtractOutlookFiles Start ---");
                 object rawDescriptor = data.GetData("FileGroupDescriptorW");
-                LogDebug("  FileGroupDescriptorW Typ: " + (rawDescriptor != null ? rawDescriptor.GetType().FullName : "NULL"));
                 MemoryStream descriptorStream = rawDescriptor as MemoryStream;
                 if (descriptorStream == null)
                 {
                     rawDescriptor = data.GetData("FileGroupDescriptor");
-                    LogDebug("  FileGroupDescriptor Typ: " + (rawDescriptor != null ? rawDescriptor.GetType().FullName : "NULL"));
                     descriptorStream = rawDescriptor as MemoryStream;
                     if (descriptorStream == null)
-                    {
-                        LogDebug("  FEHLER: Kein Descriptor-Stream!");
                         return null;
-                    }
                 }
 
                 byte[] descriptorBytes = descriptorStream.ToArray();
 
                 // Erstes DWORD = Anzahl der Dateien
                 int fileCount = BitConverter.ToInt32(descriptorBytes, 0);
-                LogDebug("  Anzahl Dateien: " + fileCount);
                 if (fileCount == 0)
                     return null;
 
@@ -270,19 +234,12 @@ namespace DragDropAddIn
                     int baseOffset = 4 + (i * descriptorSize);
                     int nameOffset = baseOffset + 72;
 
-                    LogDebug("    Descriptor: baseOffset=" + baseOffset + " nameOffset=" + nameOffset
-                        + " benoetigt=" + (nameOffset + 520) + " vorhanden=" + descriptorBytes.Length);
-
                     if (nameOffset + 520 > descriptorBytes.Length)
-                    {
-                        LogDebug("    FEHLER: Descriptor zu kurz!");
                         continue;
-                    }
 
                     string fileName = System.Text.Encoding.Unicode.GetString(
                         descriptorBytes, nameOffset, 520);
                     fileName = fileName.TrimEnd('\0');
-                    LogDebug("    Dateiname: '" + fileName + "'");
 
                     if (string.IsNullOrEmpty(fileName))
                         continue;
@@ -324,17 +281,13 @@ namespace DragDropAddIn
 
                     byte[] contentBytes = contentStream.ToArray();
                     File.WriteAllBytes(filePath, contentBytes);
-                    LogDebug("    Gespeichert: " + filePath + " (" + contentBytes.Length + " Bytes)");
                     savedFiles.Add(filePath);
                 }
 
-                LogDebug("--- ExtractOutlookFiles Ende: " + savedFiles.Count + " Dateien ---");
                 return savedFiles.ToArray();
             }
-            catch (Exception ex)
+            catch
             {
-                LogDebug("  EXCEPTION in ExtractOutlookFiles: " + ex.GetType().Name + ": " + ex.Message);
-                LogDebug("  StackTrace: " + ex.StackTrace);
                 return null;
             }
         }
@@ -347,9 +300,7 @@ namespace DragDropAddIn
         // -------------------------------------------------------
         private MemoryStream GetFileContentsStream(System.Windows.Forms.IDataObject data, int index)
         {
-            LogDebug("    --- GetFileContentsStream Index=" + index + " ---");
             System.Runtime.InteropServices.ComTypes.IDataObject comData = GetNativeComDataObject(data);
-            LogDebug("      COM-Objekt Typ: " + comData.GetType().FullName);
 
             short cfFileContents = (short)RegisterClipboardFormat("FileContents");
 
@@ -379,11 +330,8 @@ namespace DragDropAddIn
                         formatEtc.ptd = IntPtr.Zero;
                         formatEtc.tymed = tryTymed[ti];
 
-                        LogDebug("      Versuch: lindex=" + formatEtc.lindex + " tymed=" + formatEtc.tymed);
-
                         STGMEDIUM stgMedium = new STGMEDIUM();
                         comData.GetData(ref formatEtc, out stgMedium);
-                        LogDebug("      -> ERFOLGREICH! tymed=" + stgMedium.tymed);
 
                         MemoryStream result = null;
 
@@ -412,9 +360,9 @@ namespace DragDropAddIn
                         if (result != null && result.Length > 0)
                             return result;
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        LogDebug("      -> Fehlgeschlagen: " + ex.Message);
+                        // Naechste Kombination versuchen
                     }
                 }
             }
@@ -437,7 +385,6 @@ namespace DragDropAddIn
                 object innerData = innerDataInfo.GetValue(data);
                 if (innerData != null)
                 {
-                    // innerData ist oft ein OleConverter mit eigenem innerData-Feld
                     System.Reflection.FieldInfo oleInnerInfo = innerData.GetType().GetField("innerData",
                         System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
@@ -521,31 +468,24 @@ namespace DragDropAddIn
 
                 tempFile = Path.Combine(Path.GetTempPath(),
                     "DragDropBox_" + Guid.NewGuid().ToString("N") + ".msg");
-                LogDebug("        IStorage Temp-Datei: " + tempFile);
 
                 int hr = StgCreateDocfile(tempFile,
                     STGM_CREATE | STGM_READWRITE | STGM_SHARE_EXCLUSIVE,
                     0, out dstStorage);
 
                 if (hr != 0 || dstStorage == null)
-                {
-                    LogDebug("        StgCreateDocfile fehlgeschlagen, hr=0x" + hr.ToString("X8"));
                     return null;
-                }
 
                 srcStorage.CopyTo(0, IntPtr.Zero, IntPtr.Zero, dstStorage);
-                LogDebug("        IStorage.CopyTo erfolgreich");
                 dstStorage.Commit(0);
                 Marshal.ReleaseComObject(dstStorage);
                 dstStorage = null;
 
                 byte[] fileBytes = File.ReadAllBytes(tempFile);
-                LogDebug("        Temp-Datei gelesen: " + fileBytes.Length + " Bytes");
                 return new MemoryStream(fileBytes);
             }
-            catch (Exception ex)
+            catch
             {
-                LogDebug("        EXCEPTION in ReadIStorage: " + ex.GetType().Name + ": " + ex.Message);
                 return null;
             }
             finally
@@ -670,7 +610,6 @@ namespace DragDropAddIn
         // -------------------------------------------------------
         private void ProcessFiles(string[] files)
         {
-            // Filter nach erlaubten Endungen
             if (!string.IsNullOrEmpty(_allowedExtensions))
             {
                 string[] allowed = _allowedExtensions
@@ -705,10 +644,8 @@ namespace DragDropAddIn
                 files = filtered.ToArray();
             }
 
-            // Pfade speichern
             _droppedFilePaths = string.Join(";", files);
 
-            // Visuelles Feedback: Erfolg
             _dropPanel.BackColor = _successBackColor;
             _dropLabel.ForeColor = Color.FromArgb(0, 130, 60);
 
