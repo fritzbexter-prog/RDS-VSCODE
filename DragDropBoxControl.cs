@@ -38,8 +38,8 @@ namespace DragDropAddIn
     [ControlAddInExport("DragDropBox")]
     public interface IDragDropBox
     {
-        [ApplicationVisible]
-        event ControlAddInEventHandler ControlAddIn;
+        // ControlAddIn Event wird von StringControlAddInBase bereitgestellt
+        // und muss hier NICHT deklariert werden
 
         [ApplicationVisible]
         void SetDisplayText(string text);
