@@ -39,7 +39,7 @@ namespace DragDropAddIn
     public interface IDragDropBox
     {
         [ApplicationVisible]
-        event ApplicationEventHandler FileDropped;
+        event ControlAddInEventHandler ControlAddIn;
 
         [ApplicationVisible]
         void SetDisplayText(string text);
@@ -76,8 +76,7 @@ namespace DragDropAddIn
         private readonly Color _successBackColor = Color.FromArgb(220, 245, 220);
         private readonly Color _errorBackColor = Color.FromArgb(255, 230, 230);
 
-        // Events
-        public event ApplicationEventHandler FileDropped;
+        // Events (ControlAddIn Event wird von StringControlAddInBase bereitgestellt)
 
         // -------------------------------------------------------
         // Control erstellen
@@ -660,10 +659,8 @@ namespace DragDropAddIn
 
             _dropPanel.Invalidate();
 
-            if (FileDropped != null)
-            {
-                FileDropped();
-            }
+            // Event an NAV senden (Index 0, Dateipfade als Data)
+            RaiseControlAddInEvent(0, _droppedFilePaths);
         }
 
         // -------------------------------------------------------
